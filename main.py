@@ -131,9 +131,10 @@ def dijkstra_distances(w: int, h: int, start: Tuple[int, int], blocked: List[Tup
 # -----------------------------
 # Figure builder
 # -----------------------------
-def build_figure(model: GridModel) -> go.Figure:
+def build_figure(model: GridModel, kinematics: RobotKinematics = None) -> go.Figure:
+    if kinematics is None:
+        kinematics = RobotKinematics()
     dist = dijkstra_distances(model.w, model.h, model.robot, model.blocked)
-    kinematics = RobotKinematics()
     time_matrix = np.zeros_like(dist, dtype=float)
     for r in range(model.h):
         for c in range(model.w):
@@ -298,6 +299,69 @@ app.layout = html.Div(
             ]
         ),
         html.Div(
+            className="kinematics-panel",
+            children=[
+                html.H4("Robot Kinematics", className="kinematics-header"),
+                html.Div(
+                    className="kinematics-inputs",
+                    children=[
+                        html.Div(className="input-group", children=[
+                            html.Label("Max Velocity", htmlFor="input-max-velocity"),
+                            dcc.Input(
+                                id="input-max-velocity",
+                                type="number",
+                                value=19.685,
+                                min=0.1,
+                                max=50,
+                                step=0.1,
+                                className="kinematics-input",
+                            ),
+                            html.Span("ft/s", className="input-unit"),
+                        ]),
+                        html.Div(className="input-group", children=[
+                            html.Label("Acceleration", htmlFor="input-acceleration"),
+                            dcc.Input(
+                                id="input-acceleration",
+                                type="number",
+                                value=13.1234,
+                                min=0.1,
+                                max=50,
+                                step=0.1,
+                                className="kinematics-input",
+                            ),
+                            html.Span("ft/s²", className="input-unit"),
+                        ]),
+                        html.Div(className="input-group", children=[
+                            html.Label("Deceleration", htmlFor="input-deceleration"),
+                            dcc.Input(
+                                id="input-deceleration",
+                                type="number",
+                                value=13.1234,
+                                min=0.1,
+                                max=50,
+                                step=0.1,
+                                className="kinematics-input",
+                            ),
+                            html.Span("ft/s²", className="input-unit"),
+                        ]),
+                        html.Div(className="input-group", children=[
+                            html.Label("Turn Time (90°)", htmlFor="input-turn-time"),
+                            dcc.Input(
+                                id="input-turn-time",
+                                type="number",
+                                value=0.2,
+                                min=0.01,
+                                max=5,
+                                step=0.01,
+                                className="kinematics-input",
+                            ),
+                            html.Span("sec", className="input-unit"),
+                        ]),
+                    ]
+                ),
+            ]
+        ),
+        html.Div(
             className="panel-card",
             children=[
                 html.H4("Field Heatmap", style={"marginTop": 0, "marginBottom": "8px"}),
@@ -324,6 +388,12 @@ app.layout = html.Div(
             "blocked": [list(p) for p in default_model.blocked],
         }),
         dcc.Store(id="ui_mode", data="robot"),
+        dcc.Store(id="kinematics_state", data={
+            "max_velocity": 19.685,
+            "acceleration": 13.1234,
+            "deceleration": 13.1234,
+            "turn_time": 0.2,
+        }),
     ]
 )
 
@@ -394,18 +464,49 @@ def on_click(click_data, mode, data):
 
     return {"w": model.w, "h": model.h, "robot": list(model.robot), "blocked": [list(p) for p in model.blocked]}
 
-# Redraw figure whenever the model changes
+# Sync kinematics inputs to state store
+@app.callback(
+    Output("kinematics_state", "data"),
+    Input("input-max-velocity", "value"),
+    Input("input-acceleration", "value"),
+    Input("input-deceleration", "value"),
+    Input("input-turn-time", "value"),
+    prevent_initial_call=True,
+)
+def sync_kinematics(max_vel, accel, decel, turn):
+    def safe_float(val, default):
+        try:
+            v = float(val)
+            return v if v > 0 else default
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "max_velocity": safe_float(max_vel, 19.685),
+        "acceleration": safe_float(accel, 13.1234),
+        "deceleration": safe_float(decel, 13.1234),
+        "turn_time": safe_float(turn, 0.2),
+    }
+
+# Redraw figure whenever the model or kinematics changes
 @app.callback(
     Output("heatmap", "figure"),
     Input("model_state", "data"),
+    Input("kinematics_state", "data"),
 )
-def redraw(data):
+def redraw(data, kin_data):
     model = GridModel(
         w=data["w"], h=data["h"],
         robot=tuple(data["robot"]),
         blocked=[tuple(x) for x in data["blocked"]]
     )
-    return build_figure(model)
+    kinematics = RobotKinematics(
+        max_velocity=kin_data["max_velocity"],
+        acceleration=kin_data["acceleration"],
+        deceleration=kin_data["deceleration"],
+        turn_time=kin_data["turn_time"],
+    )
+    return build_figure(model, kinematics)
 
 # Highlight active mode button
 @app.callback(
